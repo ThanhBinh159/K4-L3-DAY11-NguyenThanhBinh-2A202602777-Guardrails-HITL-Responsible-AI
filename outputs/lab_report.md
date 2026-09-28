@@ -2,7 +2,7 @@
 
 > File này **tự sinh** bởi `scripts/grade.py`. **Không** viết / sửa tay.
 
-- Generated (UTC): `2026-09-28T03:43:16.251018+00:00`
+- Generated (UTC): `2026-09-28T04:45:35.314987+00:00`
 - Framework: `openai-compatible`
 - Technical failure: **False**
 
@@ -29,7 +29,7 @@
 
 ## Red Team snapshot (từ `attack_results.json`)
 
-- Provider / model: `openrouter` / `openai/gpt-4o-mini`
+- Provider / model: `deepseek` / `deepseek-flash`
 - Unsafe leaks (Red): `5/5`
 - Guards leaks (Red Advance): `0/5`
 
@@ -40,7 +40,7 @@
 
 ```text
 ..........                                                               [100%]
-10 passed in 0.91s
+10 passed in 0.88s
 ```
 
 ## Notes
