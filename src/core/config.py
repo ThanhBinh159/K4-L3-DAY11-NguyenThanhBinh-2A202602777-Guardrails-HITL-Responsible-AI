@@ -9,11 +9,10 @@ Hai tầng model (không trộn):
     → Cần ``OPENROUTER_API_KEY``
 
   Red Team (CP4)
-    → Chọn một provider: OpenAI hoặc Gemini
-    → Model mềm (điểm bắt buộc CP4): ``gpt-4o-mini`` / ``gemini-3.5-flash``
-    → Model khó (tuỳ chọn): ``gpt-5.6-luna`` / ``gemini-3.8-flash``
+    → Chọn một provider: DeepSeek, OpenRouter, OpenAI hoặc Gemini
+    → Model mặc định: ``deepseek-flash``
     → Bonus: chọn một — leak **Red** tối đa +5 **hoặc** leak **Red Advance** tối đa +10
-    → ``RED_TEAM_PROVIDER=openai|gemini`` (alias: ``LLM_PROVIDER``)
+    → ``RED_TEAM_PROVIDER=deepseek|openrouter|openai|gemini`` (alias: ``LLM_PROVIDER``)
 """
 from __future__ import annotations
 
@@ -33,15 +32,20 @@ except ImportError:
 PROVIDER_OPENAI = "openai"
 PROVIDER_GEMINI = "gemini"
 PROVIDER_OPENROUTER = "openrouter"
+PROVIDER_DEEPSEEK = "deepseek"
 
 # --- Blue Team (LOCKED) ---
 BLUE_PROVIDER = PROVIDER_OPENROUTER
-BLUE_MODEL = "liquid/lfm-2.5-2.6b"
+# OpenRouter's current endpoint ID for this free model includes the :free suffix.
+BLUE_MODEL = "liquid/lfm-2.5-2.6b:free"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_OPENROUTER_MODEL = BLUE_MODEL  # alias
 
 # --- Red Team ---
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+DEFAULT_OPENROUTER_RED_MODEL = "openai/gpt-4o-mini"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-flash"
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 # Model khó — tuỳ chọn (không phải tên agent; không bắt buộc để có B1/B2)
 HARD_OPENAI_MODEL = "gpt-5.6-luna"
@@ -113,7 +117,7 @@ def get_openrouter_api_key() -> str:
 
 
 def blue_client_kwargs() -> dict:
-    """OpenAI SDK kwargs pointing at OpenRouter (Blue Team only)."""
+    """OpenAI SDK kwargs pointing at OpenRouter."""
     return {
         "api_key": get_openrouter_api_key() or None,
         "base_url": (
@@ -128,15 +132,19 @@ def blue_provider_label() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Red Team — openai | gemini
+# Red Team — deepseek | openrouter | openai | gemini
 # ---------------------------------------------------------------------------
 
 def get_red_provider() -> str:
     raw = (
         os.environ.get("RED_TEAM_PROVIDER")
         or os.environ.get("LLM_PROVIDER")
-        or "openai"
+        or PROVIDER_DEEPSEEK
     ).strip().lower()
+    if raw == PROVIDER_DEEPSEEK:
+        return PROVIDER_DEEPSEEK
+    if raw == PROVIDER_OPENROUTER:
+        return PROVIDER_OPENROUTER
     if raw in {"gemini", "google", "adk"}:
         return PROVIDER_GEMINI
     return PROVIDER_OPENAI
@@ -148,6 +156,16 @@ def get_red_model() -> str:
         return (
             os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
             or DEFAULT_GEMINI_MODEL
+        )
+    if get_red_provider() == PROVIDER_DEEPSEEK:
+        return (
+            os.environ.get("DEEPSEEK_MODEL", DEFAULT_DEEPSEEK_MODEL).strip()
+            or DEFAULT_DEEPSEEK_MODEL
+        )
+    if get_red_provider() == PROVIDER_OPENROUTER:
+        return (
+            os.environ.get("OPENROUTER_RED_MODEL", DEFAULT_OPENROUTER_RED_MODEL).strip()
+            or DEFAULT_OPENROUTER_RED_MODEL
         )
     return (
         os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip()
@@ -169,7 +187,18 @@ def get_openai_api_key() -> str:
     return os.environ.get("OPENAI_API_KEY", "").strip()
 
 
+def get_deepseek_api_key() -> str:
+    return os.environ.get("DEEPSEEK_API_KEY", "").strip()
+
+
 def red_openai_client_kwargs() -> dict:
+    if get_red_provider() == PROVIDER_DEEPSEEK:
+        return {
+            "api_key": get_deepseek_api_key() or None,
+            "base_url": DEEPSEEK_BASE_URL,
+        }
+    if get_red_provider() == PROVIDER_OPENROUTER:
+        return blue_client_kwargs()
     return {"api_key": get_openai_api_key() or None}
 
 
@@ -180,7 +209,11 @@ def red_provider_label(tier: str = "advance") -> str:
 
 
 def red_uses_openai_sdk() -> bool:
-    return get_red_provider() == PROVIDER_OPENAI
+    return get_red_provider() in {
+        PROVIDER_DEEPSEEK,
+        PROVIDER_OPENAI,
+        PROVIDER_OPENROUTER,
+    }
 
 
 def red_uses_gemini() -> bool:
@@ -206,7 +239,7 @@ def uses_openai_sdk() -> bool:
 
 
 def openai_compatible_client_kwargs() -> dict:
-    """Default client kwargs = Red Team OpenAI (not Blue/OpenRouter)."""
+    """Return client kwargs for Red Team's configured OpenAI-compatible provider."""
     return red_openai_client_kwargs()
 
 
@@ -217,7 +250,11 @@ def provider_label() -> str:
 def is_harder_model() -> bool:
     """True nếu .env đang trỏ model khó (luna / 3.8) — tuỳ chọn, không phải tên agent."""
     m = get_red_model().lower()
-    if m in {DEFAULT_OPENAI_MODEL.lower(), DEFAULT_GEMINI_MODEL.lower()}:
+    if m in {
+        DEFAULT_DEEPSEEK_MODEL.lower(),
+        DEFAULT_OPENAI_MODEL.lower(),
+        DEFAULT_GEMINI_MODEL.lower(),
+    }:
         return False
     hard = {
         HARD_OPENAI_MODEL.lower(),
@@ -234,23 +271,33 @@ def is_harder_model() -> bool:
     return any(x in m for x in ("gpt-5.6", "pro", "gemini-3.8", "gemini-3.7"))
 
 
-def setup_api_key():
-    """Ensure keys for Blue (OpenRouter) + Red / Red Advance (OpenAI or Gemini)."""
+def setup_api_key(*, require_red: bool = True):
+    """Ensure keys for Blue (OpenRouter) and the selected Red provider."""
     if not get_openrouter_api_key():
         os.environ["OPENROUTER_API_KEY"] = input(
-            "Enter OpenRouter API Key (Blue): "
+            "Enter OpenRouter API Key (Blue and Red if selected): "
         ).strip()
     print(f"Blue  — {blue_provider_label()}  [LOCKED]")
 
     red = get_red_provider()
     model = get_red_model()
     if red == PROVIDER_GEMINI:
-        if not os.environ.get("GOOGLE_API_KEY", "").strip():
+        if require_red and not os.environ.get("GOOGLE_API_KEY", "").strip():
             os.environ["GOOGLE_API_KEY"] = input("Enter Google API Key (Red): ").strip()
         os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "0"
         print(f"Red / Red Advance  — gemini:{model}")
+    elif red == PROVIDER_OPENROUTER:
+        print(f"Red / Red Advance  — openrouter:{model}")
+    elif red == PROVIDER_DEEPSEEK:
+        if require_red and not get_deepseek_api_key():
+            from getpass import getpass
+
+            os.environ["DEEPSEEK_API_KEY"] = getpass(
+                "Enter DeepSeek API Key (Red): "
+            ).strip()
+        print(f"Red / Red Advance  — deepseek:{model}")
     else:
-        if not get_openai_api_key():
+        if require_red and not get_openai_api_key():
             os.environ["OPENAI_API_KEY"] = input("Enter OpenAI API Key (Red): ").strip()
         print(f"Red / Red Advance  — openai:{model}")
 
