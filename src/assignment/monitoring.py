@@ -42,16 +42,54 @@ class MonitoringAlert:
     judge_fails: int = 0
 
     def check_metrics(self) -> list[Alert]:
-        """TODO: compute rates, append Alert objects when thresholds exceeded."""
-        raise NotImplementedError("Implement MonitoringAlert.check_metrics")
+        """Refresh alerts from current counters and return them."""
+        metrics = self.snapshot()
+        self.alerts.clear()
+
+        if self.total_requests and metrics["block_rate"] > self.block_rate_threshold:
+            self.alerts.append(
+                Alert(
+                    "block_rate",
+                    metrics["block_rate"],
+                    self.block_rate_threshold,
+                    "Blocked request rate exceeded the configured threshold.",
+                )
+            )
+        if self.rate_limit_hits > self.rate_limit_hit_threshold:
+            self.alerts.append(
+                Alert(
+                    "rate_limit_hits",
+                    self.rate_limit_hits,
+                    self.rate_limit_hit_threshold,
+                    "Rate-limit hits exceeded the configured threshold.",
+                )
+            )
+        if (
+            self.judge_checks
+            and metrics["judge_fail_rate"] > self.judge_fail_rate_threshold
+        ):
+            self.alerts.append(
+                Alert(
+                    "judge_fail_rate",
+                    metrics["judge_fail_rate"],
+                    self.judge_fail_rate_threshold,
+                    "Judge failure rate exceeded the configured threshold.",
+                )
+            )
+        return list(self.alerts)
 
     def export_json(self, filepath: str | None = None):
         """TODO: write metrics + alerts to JSON under repo-root ``outputs/`` by default.
         Use ``filepath or default_metrics_path()`` so running from ``src/`` does not
         create ``src/outputs/``.
         """
-        _ = filepath or default_metrics_path()
-        raise NotImplementedError("Implement MonitoringAlert.export_json")
+        target = Path(filepath) if filepath else Path(default_metrics_path())
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self.check_metrics()
+        target.write_text(
+            json.dumps(self.snapshot(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
     def snapshot(self) -> dict:
         block_rate = (
